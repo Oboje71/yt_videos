@@ -1,0 +1,43 @@
+
+================================================================================
+               SYDNEY ELECTRICIAN BUSINESS OWNER SCRAPER
+================================================================================
+Scraping 27 Sydney electrician websites...
+Extracting: Business Owner Names & LinkedIn Profiles
+================================================================================
+
+
+[1/27] Processing: Sydney Electrical Service
+--------------------------------------------------------------------------------
+2025-11-05 11:21:57,105 - INFO - Scraping: Sydney Electrical Service
+2025-11-05 11:21:57,105 - INFO -   URL: https://sydneyelectricalservice.com.au/
+2025-11-05 11:21:57,330 - ERROR -   ✗ Request error: 403 Client Error: Forbidden for url: https://sydneyelectricalservice.com.au/
+✗ FAILED - Added with limited info
+
+[2/27] Processing: The Local Electrician Sydney Level 2 & Emergency Specialists
+--------------------------------------------------------------------------------
+2025-11-05 11:22:02,020 - INFO - Scraping: The Local Electrician Sydney Level 2 & Emergency Specialists
+2025-11-05 11:22:02,021 - INFO -   URL: https://www.thelocalelectrician.com.au/
+2025-11-05 11:22:02,197 - ERROR -   ✗ Request error: 403 Client Error: Forbidden for url: https://www.thelocalelectrician.com.au/
+✗ FAILED - Added with limited info
+
+[3/27] Processing: Just Electrical Sydney Pty Ltd
+--------------------------------------------------------------------------------
+2025-11-05 11:22:07,182 - INFO - Scraping: Just Electrical Sydney Pty Ltd
+2025-11-05 11:22:07,183 - INFO -   URL: https://www.justelectricalsydney.com.au/
+2025-11-05 11:22:07,407 - ERROR -   ✗ Request error: 403 Client Error: Forbidden for url: https://www.justelectricalsydney.com.au/
+✗ FAILED - Added with limited info
+
+[4/27] Processing: 360 Degrees Sydney Electrical
+--------------------------------------------------------------------------------
+2025-11-05 11:22:11,158 - INFO - Scraping: 360 Degrees Sydney Electrical
+2025-11-05 11:22:11,158 - INFO -   URL: http://www.360sydneyelectrical.com.au/
+2025-11-05 11:22:11,165 - ERROR -   ✗ Request error: 403 Client Error: Forbidden for url: http://www.360sydneyelectrical.com.au/
+✗ FAILED - Added with limited info
+
+[5/27] Processing: 24/7 Local Electrician
+--------------------------------------------------------------------------------
+2025-11-05 11:22:16,359 - INFO - Scraping: 24/7 Local Electrician
+2025-11-05 11:22:16,360 - INFO -   URL: https://247localelectrician.com.au/
+2025-11-05 11:22:16,512 - ERROR -   ✗ Request error: 403 Client Error: Forbidden for url: https://247localelectrician.com.au/
+✗ FAILED - Added with limited info
