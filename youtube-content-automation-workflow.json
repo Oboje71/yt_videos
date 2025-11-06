@@ -1,0 +1,721 @@
+{
+  "name": "YouTube Content Automation Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "youtube-automation",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook - Receive YouTube Link",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "youtube-automation"
+    },
+    {
+      "parameters": {
+        "url": "https://youtube-transcript3.p.rapidapi.com/api/transcript",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "rapidApiApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-RapidAPI-Key",
+              "value": "={{ $env.RAPIDAPI_KEY }}"
+            },
+            {
+              "name": "X-RapidAPI-Host",
+              "value": "youtube-transcript3.p.rapidapi.com"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendQuery": false,
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "video_id",
+              "value": "={{ $json.youtube_url }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "rapidapi-transcript",
+      "name": "RapidAPI - Extract Transcript",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract video ID from YouTube URL\nconst youtubeUrl = $input.item.json.youtube_url;\nlet videoId = '';\n\n// Handle different YouTube URL formats\nif (youtubeUrl.includes('youtu.be/')) {\n  videoId = youtubeUrl.split('youtu.be/')[1].split('?')[0];\n} else if (youtubeUrl.includes('youtube.com/watch?v=')) {\n  videoId = youtubeUrl.split('v=')[1].split('&')[0];\n} else if (youtubeUrl.includes('youtube.com/embed/')) {\n  videoId = youtubeUrl.split('embed/')[1].split('?')[0];\n}\n\nreturn {\n  json: {\n    youtube_url: youtubeUrl,\n    video_id: videoId,\n    client_email: $input.item.json.client_email || '',\n    client_name: $input.item.json.client_name || 'Client'\n  }\n};"
+      },
+      "id": "extract-video-id",
+      "name": "Extract Video ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [360, 300]
+    },
+    {
+      "parameters": {
+        "resource": "text",
+        "operation": "message",
+        "modelId": "gpt-4-turbo-preview",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are an expert content strategist. Analyze the YouTube transcript and identify the most engaging hooks - key moments, quotes, or ideas that would capture audience attention. Return your analysis in JSON format with an array of hooks, each containing: 'timestamp', 'hook_text', 'context', and 'engagement_potential' (1-10 rating)."
+            },
+            {
+              "role": "user",
+              "content": "=Analyze this YouTube video transcript and identify the top 5-10 hooks:\\n\\n{{ $json.transcript }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.7,
+          "maxTokens": 2000
+        }
+      },
+      "id": "chatgpt-identify-hooks",
+      "name": "ChatGPT - Identify Hooks",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.3,
+      "position": [690, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-credentials",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the ChatGPT response and prepare data for social posts\nconst response = $input.item.json.message?.content || $input.item.json.text;\nlet hooks = [];\n\ntry {\n  // Try to parse JSON from the response\n  const jsonMatch = response.match(/\\[.*\\]/s) || response.match(/\\{.*\\}/s);\n  if (jsonMatch) {\n    const parsed = JSON.parse(jsonMatch[0]);\n    hooks = Array.isArray(parsed) ? parsed : [parsed];\n  }\n} catch (e) {\n  // If parsing fails, create a basic structure\n  hooks = [{ hook_text: response, engagement_potential: 8 }];\n}\n\nreturn {\n  json: {\n    youtube_url: $('Extract Video ID').item.json.youtube_url,\n    video_id: $('Extract Video ID').item.json.video_id,\n    transcript: $('RapidAPI - Extract Transcript').item.json.transcript,\n    hooks: hooks,\n    client_email: $('Extract Video ID').item.json.client_email,\n    client_name: $('Extract Video ID').item.json.client_name,\n    top_hook: hooks[0]?.hook_text || '',\n    all_hooks_text: hooks.map(h => h.hook_text).join('\\n\\n')\n  }\n};"
+      },
+      "id": "parse-hooks",
+      "name": "Parse Hooks Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "resource": "text",
+        "operation": "message",
+        "modelId": "gpt-4-turbo-preview",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a social media expert specializing in X (Twitter). Create engaging, concise posts that capture attention. Use hooks, threads, and trending formats. Keep posts under 280 characters or create threads if needed."
+            },
+            {
+              "role": "user",
+              "content": "=Create 3 X (Twitter) posts based on these hooks from a YouTube video:\\n\\nHooks: {{ $json.all_hooks_text }}\\n\\nMake them engaging, shareable, and include relevant hashtags. Format as a JSON array with 'post_number' and 'content' fields."
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.8,
+          "maxTokens": 1000
+        }
+      },
+      "id": "create-x-posts",
+      "name": "ChatGPT - Create X Posts",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.3,
+      "position": [1130, 200],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-credentials",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "text",
+        "operation": "message",
+        "modelId": "gpt-4-turbo-preview",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a LinkedIn content strategist. Create professional, value-driven posts that spark meaningful discussions. Use storytelling, data points, and professional insights. Include line breaks for readability."
+            },
+            {
+              "role": "user",
+              "content": "=Create 2 LinkedIn posts based on these hooks from a YouTube video:\\n\\nHooks: {{ $json.all_hooks_text }}\\n\\nMake them professional, insightful, and encourage engagement. Format as a JSON array with 'post_number' and 'content' fields."
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.7,
+          "maxTokens": 1500
+        }
+      },
+      "id": "create-linkedin-posts",
+      "name": "ChatGPT - Create LinkedIn Posts",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.3,
+      "position": [1130, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-credentials",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "text",
+        "operation": "message",
+        "modelId": "gpt-4-turbo-preview",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are an Instagram content creator. Create visually-oriented, engaging captions with strategic hashtag use. Focus on storytelling, emojis, and call-to-actions that drive engagement."
+            },
+            {
+              "role": "user",
+              "content": "=Create 2 Instagram post captions based on these hooks from a YouTube video:\\n\\nHooks: {{ $json.all_hooks_text }}\\n\\nInclude engaging captions, relevant hashtags (10-15), and CTAs. Format as a JSON array with 'post_number', 'caption', and 'hashtags' fields."
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.8,
+          "maxTokens": 1500
+        }
+      },
+      "id": "create-instagram-posts",
+      "name": "ChatGPT - Create Instagram Posts",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.3,
+      "position": [1130, 400],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-credentials",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.vizard.ai/v1/video/create",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.VIZARD_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "video_url",
+              "value": "={{ $('Parse Hooks Data').item.json.youtube_url }}"
+            },
+            {
+              "name": "style",
+              "value": "shorts"
+            },
+            {
+              "name": "duration",
+              "value": "60"
+            },
+            {
+              "name": "auto_caption",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "vizard-create-shorts",
+      "name": "Vizard AI - Create Shorts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1130, 500]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combine all social media posts and prepare for Google Drive storage\nconst baseData = $('Parse Hooks Data').item.json;\nconst xPosts = $('ChatGPT - Create X Posts').item.json;\nconst linkedinPosts = $('ChatGPT - Create LinkedIn Posts').item.json;\nconst instagramPosts = $('ChatGPT - Create Instagram Posts').item.json;\nconst vizardResponse = $('Vizard AI - Create Shorts').item.json;\n\n// Parse social media posts\nfunction extractPosts(response) {\n  const content = response.message?.content || response.text || JSON.stringify(response);\n  try {\n    const jsonMatch = content.match(/\\[.*\\]/s);\n    if (jsonMatch) {\n      return JSON.parse(jsonMatch[0]);\n    }\n  } catch (e) {}\n  return [{ content: content }];\n}\n\nconst xPostsArray = extractPosts(xPosts);\nconst linkedinPostsArray = extractPosts(linkedinPosts);\nconst instagramPostsArray = extractPosts(instagramPosts);\n\n// Create formatted content for documents\nconst xPostsText = xPostsArray.map((p, i) => `POST ${i + 1}:\\n${p.content || p.post}\\n`).join('\\n---\\n\\n');\nconst linkedinPostsText = linkedinPostsArray.map((p, i) => `POST ${i + 1}:\\n${p.content || p.post}\\n`).join('\\n---\\n\\n');\nconst instagramPostsText = instagramPostsArray.map((p, i) => `POST ${i + 1}:\\n${p.caption || p.content}\\n\\nHashtags: ${p.hashtags || ''}\\n`).join('\\n---\\n\\n');\n\nconst hooksText = baseData.hooks.map((h, i) => \n  `HOOK ${i + 1} (Engagement: ${h.engagement_potential || 'N/A'}/10):\\n${h.hook_text}\\n${h.context ? 'Context: ' + h.context : ''}\\n${h.timestamp ? 'Timestamp: ' + h.timestamp : ''}`\n).join('\\n\\n---\\n\\n');\n\nconst timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);\nconst folderName = `YouTube_Content_${baseData.video_id}_${timestamp}`;\n\nreturn {\n  json: {\n    ...baseData,\n    folder_name: folderName,\n    timestamp: timestamp,\n    x_posts_text: xPostsText,\n    linkedin_posts_text: linkedinPostsText,\n    instagram_posts_text: instagramPostsText,\n    hooks_text: hooksText,\n    vizard_video_id: vizardResponse.video_id || vizardResponse.id || 'processing',\n    vizard_status: vizardResponse.status || 'submitted'\n  }\n};"
+      },
+      "id": "prepare-drive-content",
+      "name": "Prepare Content for Drive",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1350, 300]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "name": "={{ $json.folder_name }}",
+        "options": {}
+      },
+      "id": "gdrive-create-folder",
+      "name": "Google Drive - Create Folder",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1570, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "google-drive-credentials",
+          "name": "Google Drive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "name": "X_Twitter_Posts.txt",
+        "resolveData": false,
+        "parents": {
+          "values": [
+            {
+              "folderId": "={{ $('Google Drive - Create Folder').item.json.id }}"
+            }
+          ]
+        },
+        "options": {
+          "binaryData": false,
+          "fileContent": "=X (TWITTER) POSTS\\n===================\\n\\nVideo: {{ $('Prepare Content for Drive').item.json.youtube_url }}\\nGenerated: {{ $('Prepare Content for Drive').item.json.timestamp }}\\n\\n{{ $('Prepare Content for Drive').item.json.x_posts_text }}"
+        }
+      },
+      "id": "gdrive-save-x-posts",
+      "name": "Google Drive - Save X Posts",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1790, 200],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "google-drive-credentials",
+          "name": "Google Drive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "name": "LinkedIn_Posts.txt",
+        "resolveData": false,
+        "parents": {
+          "values": [
+            {
+              "folderId": "={{ $('Google Drive - Create Folder').item.json.id }}"
+            }
+          ]
+        },
+        "options": {
+          "binaryData": false,
+          "fileContent": "=LINKEDIN POSTS\\n===============\\n\\nVideo: {{ $('Prepare Content for Drive').item.json.youtube_url }}\\nGenerated: {{ $('Prepare Content for Drive').item.json.timestamp }}\\n\\n{{ $('Prepare Content for Drive').item.json.linkedin_posts_text }}"
+        }
+      },
+      "id": "gdrive-save-linkedin-posts",
+      "name": "Google Drive - Save LinkedIn Posts",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1790, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "google-drive-credentials",
+          "name": "Google Drive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "name": "Instagram_Posts.txt",
+        "resolveData": false,
+        "parents": {
+          "values": [
+            {
+              "folderId": "={{ $('Google Drive - Create Folder').item.json.id }}"
+            }
+          ]
+        },
+        "options": {
+          "binaryData": false,
+          "fileContent": "=INSTAGRAM POSTS\\n================\\n\\nVideo: {{ $('Prepare Content for Drive').item.json.youtube_url }}\\nGenerated: {{ $('Prepare Content for Drive').item.json.timestamp }}\\n\\n{{ $('Prepare Content for Drive').item.json.instagram_posts_text }}"
+        }
+      },
+      "id": "gdrive-save-instagram-posts",
+      "name": "Google Drive - Save Instagram Posts",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1790, 400],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "google-drive-credentials",
+          "name": "Google Drive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "name": "Content_Hooks.txt",
+        "resolveData": false,
+        "parents": {
+          "values": [
+            {
+              "folderId": "={{ $('Google Drive - Create Folder').item.json.id }}"
+            }
+          ]
+        },
+        "options": {
+          "binaryData": false,
+          "fileContent": "=CONTENT HOOKS\\n==============\\n\\nVideo: {{ $('Prepare Content for Drive').item.json.youtube_url }}\\nAnalyzed: {{ $('Prepare Content for Drive').item.json.timestamp }}\\n\\n{{ $('Prepare Content for Drive').item.json.hooks_text }}"
+        }
+      },
+      "id": "gdrive-save-hooks",
+      "name": "Google Drive - Save Hooks",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1790, 500],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "google-drive-credentials",
+          "name": "Google Drive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "name": "Vizard_AI_Info.txt",
+        "resolveData": false,
+        "parents": {
+          "values": [
+            {
+              "folderId": "={{ $('Google Drive - Create Folder').item.json.id }}"
+            }
+          ]
+        },
+        "options": {
+          "binaryData": false,
+          "fileContent": "=VIZARD AI SHORTS\\n=================\\n\\nVideo: {{ $('Prepare Content for Drive').item.json.youtube_url }}\\nCreated: {{ $('Prepare Content for Drive').item.json.timestamp }}\\n\\nVizard Video ID: {{ $('Prepare Content for Drive').item.json.vizard_video_id }}\\nStatus: {{ $('Prepare Content for Drive').item.json.vizard_status }}\\n\\nNote: Short videos are being processed by Vizard AI. You will receive them once processing is complete.\\nCheck your Vizard AI dashboard for the final videos."
+        }
+      },
+      "id": "gdrive-save-vizard-info",
+      "name": "Google Drive - Save Vizard Info",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1790, 600],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "google-drive-credentials",
+          "name": "Google Drive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get folder URL from Google Drive\nconst folderId = $('Google Drive - Create Folder').item.json.id;\nconst folderUrl = `https://drive.google.com/drive/folders/${folderId}`;\nconst folderName = $('Prepare Content for Drive').item.json.folder_name;\nconst videoUrl = $('Prepare Content for Drive').item.json.youtube_url;\nconst clientEmail = $('Prepare Content for Drive').item.json.client_email;\nconst clientName = $('Prepare Content for Drive').item.json.client_name;\n\nreturn {\n  json: {\n    folder_url: folderUrl,\n    folder_name: folderName,\n    video_url: videoUrl,\n    client_email: clientEmail,\n    client_name: clientName,\n    timestamp: new Date().toLocaleString()\n  }\n};"
+      },
+      "id": "prepare-email-data",
+      "name": "Prepare Email Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2010, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SENDER_EMAIL }}",
+        "toEmail": "={{ $json.client_email }}",
+        "subject": "=Your YouTube Content is Ready! 🎬",
+        "emailType": "html",
+        "message": "=<!DOCTYPE html>\\n<html>\\n<head>\\n  <style>\\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\\n    .container { max-width: 600px; margin: 0 auto; padding: 20px; }\\n    .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }\\n    .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }\\n    .button { display: inline-block; padding: 12px 30px; background: #667eea; color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; }\\n    .footer { text-align: center; margin-top: 30px; color: #666; font-size: 12px; }\\n    .content-list { background: white; padding: 20px; border-radius: 5px; margin: 20px 0; }\\n  </style>\\n</head>\\n<body>\\n  <div class=\\"container\\">\\n    <div class=\\"header\\">\\n      <h1>🎬 Your Content is Ready!</h1>\\n    </div>\\n    <div class=\\"content\\">\\n      <p>Hi {{ $json.client_name }},</p>\\n      \\n      <p>Great news! We've successfully processed your YouTube video and created engaging content for your social media channels.</p>\\n      \\n      <div class=\\"content-list\\">\\n        <h3>📦 What's included:</h3>\\n        <ul>\\n          <li>✅ <strong>X (Twitter) Posts</strong> - 3 engaging posts ready to tweet</li>\\n          <li>✅ <strong>LinkedIn Posts</strong> - 2 professional posts for your network</li>\\n          <li>✅ <strong>Instagram Captions</strong> - 2 posts with hashtags</li>\\n          <li>✅ <strong>Content Hooks</strong> - AI-identified engagement opportunities</li>\\n          <li>✅ <strong>Short Videos</strong> - Vizard AI processed clips (check status in folder)</li>\\n        </ul>\\n      </div>\\n      \\n      <p><strong>Source Video:</strong><br>\\n      <a href=\\"{{ $json.video_url }}\\">{{ $json.video_url }}</a></p>\\n      \\n      <p style=\\"text-align: center;\\">\\n        <a href=\\"{{ $json.folder_url }}\\" class=\\"button\\">📂 Access Your Content on Google Drive</a>\\n      </p>\\n      \\n      <p><strong>Folder Name:</strong> {{ $json.folder_name }}</p>\\n      \\n      <p><em>Note: All your content is organized in separate files within the Google Drive folder. The Vizard AI shorts may take a few minutes to process completely - check the Vizard AI Info file for details.</em></p>\\n      \\n      <p>If you have any questions or need revisions, just reply to this email!</p>\\n      \\n      <p>Best regards,<br>\\n      Your Content Automation Team</p>\\n    </div>\\n    <div class=\\"footer\\">\\n      <p>This email was sent at {{ $json.timestamp }}</p>\\n      <p>Automated by n8n YouTube Content Workflow</p>\\n    </div>\\n  </div>\\n</body>\\n</html>",
+        "options": {}
+      },
+      "id": "send-email",
+      "name": "Send Email to Client",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [2230, 300],
+      "credentials": {
+        "smtp": {
+          "id": "smtp-credentials",
+          "name": "SMTP Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\\n  \\\"success\\\": true,\\n  \\\"message\\\": \\\"Content generation completed successfully\\\",\\n  \\\"folder_url\\\": $json.folder_url,\\n  \\\"folder_name\\\": $json.folder_name,\\n  \\\"timestamp\\\": $json.timestamp\\n} }}",
+        "options": {}
+      },
+      "id": "webhook-response",
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2450, 300]
+    }
+  ],
+  "connections": {
+    "Webhook - Receive YouTube Link": {
+      "main": [
+        [
+          {
+            "node": "Extract Video ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Video ID": {
+      "main": [
+        [
+          {
+            "node": "RapidAPI - Extract Transcript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RapidAPI - Extract Transcript": {
+      "main": [
+        [
+          {
+            "node": "ChatGPT - Identify Hooks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ChatGPT - Identify Hooks": {
+      "main": [
+        [
+          {
+            "node": "Parse Hooks Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Hooks Data": {
+      "main": [
+        [
+          {
+            "node": "ChatGPT - Create X Posts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "ChatGPT - Create LinkedIn Posts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "ChatGPT - Create Instagram Posts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Vizard AI - Create Shorts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ChatGPT - Create X Posts": {
+      "main": [
+        [
+          {
+            "node": "Prepare Content for Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ChatGPT - Create LinkedIn Posts": {
+      "main": [
+        [
+          {
+            "node": "Prepare Content for Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ChatGPT - Create Instagram Posts": {
+      "main": [
+        [
+          {
+            "node": "Prepare Content for Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vizard AI - Create Shorts": {
+      "main": [
+        [
+          {
+            "node": "Prepare Content for Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Content for Drive": {
+      "main": [
+        [
+          {
+            "node": "Google Drive - Create Folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Drive - Create Folder": {
+      "main": [
+        [
+          {
+            "node": "Google Drive - Save X Posts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Google Drive - Save LinkedIn Posts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Google Drive - Save Instagram Posts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Google Drive - Save Hooks",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Google Drive - Save Vizard Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Drive - Save X Posts": {
+      "main": [
+        [
+          {
+            "node": "Prepare Email Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Drive - Save LinkedIn Posts": {
+      "main": [
+        [
+          {
+            "node": "Prepare Email Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Drive - Save Instagram Posts": {
+      "main": [
+        [
+          {
+            "node": "Prepare Email Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Drive - Save Hooks": {
+      "main": [
+        [
+          {
+            "node": "Prepare Email Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Drive - Save Vizard Info": {
+      "main": [
+        [
+          {
+            "node": "Prepare Email Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Email Data": {
+      "main": [
+        [
+          {
+            "node": "Send Email to Client",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email to Client": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2025-11-06T00:00:00.000Z",
+  "versionId": "1"
+}
